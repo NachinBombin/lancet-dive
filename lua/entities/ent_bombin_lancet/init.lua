@@ -3,17 +3,10 @@ AddCSLuaFile("shared.lua")
 include("shared.lua")
 
 -- ============================================================
--- PASS SOUNDS & ENGINE
+-- ENGINE SOUND  (TB2 pattern — anchored to world, not entity)
 -- ============================================================
 
-local PASS_SOUNDS = {
-	"lvs_darklord/rotors/rotor_loop_close.wav",
-	"lvs_darklord/rotors/rotor_loop_dist.wav",
-}
-
-local ENGINE_START_SOUND = "lvs_darklord/mi_engine/mi24_engine_start_exterior.wav"
-local ENGINE_LOOP_SOUND  = "^lvs_darklord/rotors/rotor_loop_close.wav"
-local ENGINE_DIST_SOUND  = "^lvs_darklord/rotors/rotor_loop_dist.wav"
+local ENGINE_LOOP_SOUND = "lfs/spitfire/rpm_2.wav"
 
 -- ============================================================
 -- TUNING
@@ -79,16 +72,13 @@ function ENT:Initialize()
 	self:SetAngles(Angle(0, ang.y + 70, 0))
 	self.ang = self:GetAngles()
 
-	-- Roll & Pitch state
 	self.SmoothedRoll  = 0
 	self.SmoothedPitch = 0
 	self.PrevYaw       = self:GetAngles().y
 
-	-- Wind jitter
 	self.JitterPhase     = math.Rand(0, math.pi * 2)
 	self.JitterAmplitude = 12
 
-	-- Altitude drift
 	self.AltDriftCurrent  = self.sky
 	self.AltDriftTarget   = self.sky
 	self.AltDriftNextPick = CurTime() + math.Rand(8, 20)
@@ -101,25 +91,14 @@ function ENT:Initialize()
 		self.PhysObj:EnableGravity(false)
 	end
 
-	sound.Play(ENGINE_START_SOUND, spawnPos, 90, 100, 1.0)
-
-	self.RotorLoopClose = CreateSound(self, ENGINE_LOOP_SOUND)
-	if self.RotorLoopClose then
-		self.RotorLoopClose:SetSoundLevel(125)
-		self.RotorLoopClose:ChangePitch(100, 0)
-		self.RotorLoopClose:ChangeVolume(1.0, 0.5)
-		self.RotorLoopClose:Play()
+	-- TB2 pattern: world-anchored, no falloff, no PASS_SOUNDS
+	self.EngineLoop = CreateSound(game.GetWorld(), ENGINE_LOOP_SOUND)
+	if self.EngineLoop then
+		self.EngineLoop:SetSoundLevel(0)
+		self.EngineLoop:ChangePitch(85, 0)
+		self.EngineLoop:ChangeVolume(0.4, 0)
+		self.EngineLoop:Play()
 	end
-
-	self.RotorLoopDist = CreateSound(self, ENGINE_DIST_SOUND)
-	if self.RotorLoopDist then
-		self.RotorLoopDist:SetSoundLevel(125)
-		self.RotorLoopDist:ChangePitch(100, 0)
-		self.RotorLoopDist:ChangeVolume(1.0, 0.5)
-		self.RotorLoopDist:Play()
-	end
-
-	self.NextPassSound = CurTime() + math.Rand(5, 10)
 
 	-- Weapon state
 	self.CurrentWeapon   = nil
@@ -133,22 +112,18 @@ function ENT:Initialize()
 	self.DiveExploded  = false
 	self.DiveAimOffset = Vector(0,0,0)
 
-	-- Layer 1H: Horizontal wobble
 	self.DiveWobblePhase = 0
 	self.DiveWobbleAmp   = 180
 	self.DiveWobbleSpeed = 4.5
 
-	-- Layer 1V: Vertical wobble
 	self.DiveWobblePhaseV = math.Rand(0, math.pi * 2)
 	self.DiveWobbleAmpV   = 130
 	self.DiveWobbleSpeedV = 3.1
 
-	-- Layer 2: Speed surge
 	self.DiveSpeedMin     = self.DIVE_Speed * 0.55
 	self.DiveSpeedCurrent = self.DIVE_Speed * 0.55
 	self.DiveSpeedLerp    = 0.018
 
-	-- Layer 3: Pre-dive pitch telegraph
 	self.DivePitchTelegraph = 0
 
 	self:Debug("Spawned at " .. tostring(spawnPos))
@@ -201,14 +176,6 @@ function ENT:Think()
 		self.PhysObj:Wake()
 	end
 
-	if ct >= self.NextPassSound then
-		sound.Play(
-			table.Random(PASS_SOUNDS),
-			self:GetPos(), 100, math.random(96, 104), 1.0
-		)
-		self.NextPassSound = ct + math.Rand(6, 12)
-	end
-
 	local age  = ct - self.SpawnTime
 	local left = self.DieTime - ct
 	local alpha = 255
@@ -241,21 +208,18 @@ function ENT:PhysicsUpdate(phys)
 
 	local pos = self:GetPos()
 
-	-- Altitude drift
 	if CurTime() >= self.AltDriftNextPick then
 		self.AltDriftTarget   = self.sky + math.Rand(-self.AltDriftRange, self.AltDriftRange)
 		self.AltDriftNextPick = CurTime() + math.Rand(10, 25)
 	end
 	self.AltDriftCurrent = Lerp(self.AltDriftLerp, self.AltDriftCurrent, self.AltDriftTarget)
 
-	-- Wind jitter
 	self.JitterPhase = self.JitterPhase + 0.04
 	local jitter     = math.sin(self.JitterPhase) * self.JitterAmplitude
 
 	local liveAlt = self.AltDriftCurrent + jitter
 	self:SetPos(Vector(pos.x, pos.y, liveAlt))
 
-	-- Orbit turn
 	local flatPos    = Vector(pos.x, pos.y, 0)
 	local flatCenter = Vector(self.CenterPos.x, self.CenterPos.y, 0)
 	local dist       = flatPos:Distance(flatCenter)
@@ -272,10 +236,8 @@ function ENT:PhysicsUpdate(phys)
 		skyYaw = 0.3
 	end
 
-	local totalYawDelta = orbitYaw + skyYaw
-	self.ang = self.ang + Angle(0, totalYawDelta, 0)
+	self.ang = self.ang + Angle(0, orbitYaw + skyYaw, 0)
 
-	-- ROLL — yaw-rate driven
 	local currentYaw  = self.ang.y
 	local rawYawDelta = math.NormalizeAngle(currentYaw - (self.PrevYaw or currentYaw))
 	self.PrevYaw      = currentYaw
@@ -284,7 +246,6 @@ function ENT:PhysicsUpdate(phys)
 	local rollLerp    = rawYawDelta ~= 0 and 0.15 or 0.05
 	self.SmoothedRoll = Lerp(rollLerp, self.SmoothedRoll, targetRoll)
 
-	-- PITCH — forward-speed driven
 	local vel          = IsValid(phys) and phys:GetVelocity() or Vector(0,0,0)
 	local forwardSpeed = vel:Dot(self:GetForward())
 	local speedRatio   = math.Clamp(forwardSpeed / self.Speed, 0, 1)
@@ -487,7 +448,6 @@ function ENT:DiveExplode(pos)
 
 	self:Debug("DIVE: exploding at " .. tostring(pos))
 
-	-- Single tight blast — smallest of the family
 	local ed1 = EffectData()
 	ed1:SetOrigin(pos)
 	ed1:SetScale(2) ed1:SetMagnitude(2) ed1:SetRadius(200)
@@ -531,10 +491,14 @@ function ENT:FindGround(centerPos)
 end
 
 -- ============================================================
--- CLEANUP
+-- CLEANUP  (TB2 pattern — fade volume then stop)
 -- ============================================================
 
 function ENT:OnRemove()
-	if self.RotorLoopClose then self.RotorLoopClose:Stop() end
-	if self.RotorLoopDist  then self.RotorLoopDist:Stop()  end
+	if self.EngineLoop then
+		self.EngineLoop:ChangeVolume(0, 0.5)
+		timer.Simple(0.6, function()
+			if self.EngineLoop then self.EngineLoop:Stop() end
+		end)
+	end
 end
