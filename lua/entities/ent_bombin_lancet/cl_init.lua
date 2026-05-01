@@ -1,4 +1,5 @@
 include("shared.lua")
+include("cl_trailsystem.lua")
 
 -- ================================================================
 -- Lancet-3 — CLIENT
